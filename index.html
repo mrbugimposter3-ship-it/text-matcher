@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Text Matcher</title><style>
+body{margin:0;background:#0f1a14;color:#e8f5e9;font-family:system-ui;padding:12px;max-width:900px;margin:auto}
+h1{color:#a5d6a7;font-size:22px}textarea{width:100%;box-sizing:border-box;height:140px;background:#16261d;color:#fff;border:1px solid #2e7d32;border-radius:8px;padding:8px;font-size:14px}
+button,select,input{background:#2e7d32;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:15px;margin:4px 2px}input[type=text],input[type=number]{background:#16261d;border:1px solid #2e7d32}
+.tabs button.on{background:#ffd54f;color:#000}.card{background:#16261d;border-radius:10px;padding:10px;margin:10px 0}
+mark{background:#ffd54f;color:#000}.score{font-size:28px;color:#ffd54f}.small{font-size:12px;color:#9ab}
+.bar{height:8px;background:#244;border-radius:4px}.bar div{height:8px;background:#66bb6a;border-radius:4px}
+</style></head><body>
+<h1>Text Matcher</h1>
+<div class="tabs"><button id="t1" class="on">Compare two texts</button><button id="t2">Search Project Gutenberg</button></div>
+<div id="p1"><p>Text A</p><textarea id="a"></textarea><p>Text B</p><textarea id="b"></textarea>
+<label>Phrase length <input id="n1" type="number" value="4" min="2" max="10" style="width:60px"> words</label>
+<button id="cmp">Compare</button><div id="r1"></div></div>
+<div id="p2" style="display:none"><p>Paste your text (for example a passage of Kashf al-Mahjub):</p><textarea id="q"></textarea>
+<label>Extra search words (optional) <input id="kw" type="text" placeholder="e.g. sufi mysticism"></label><br>
+<label>Books to check <input id="nb" type="number" value="25" min="5" max="80" style="width:60px"></label>
+<label>Phrase length <input id="n2" type="number" value="4" min="2" max="10" style="width:60px"></label>
+<button id="go">Find matching books</button><div id="st" class="small"></div><div id="r2"></div>
+<p class="small">How it works: the app picks your text's most distinctive words, asks Gutendex (the Project Gutenberg catalog) for related books, downloads their full text, and ranks them by shared word sequences. Checking all ~75,000 books live isn't possible from a phone, so it checks the most relevant ones. Gutenberg doesn't allow direct downloads from web pages, so texts go through a public proxy.</p></div>
+<script>
+const $=id=>document.getElementById(id);
+$('t1').onclick=()=>{$('p1').style.display='';$('p2').style.display='none';$('t1').className='on';$('t2').className=''};
+$('t2').onclick=()=>{$('p2').style.display='';$('p1').style.display='none';$('t2').className='on';$('t1').className=''};
+const STOP=new Set("the a an and or of to in on at for with by from is are was were be been it this that these those as his her their its he she they we you i not but so if then which who whom what when where there all any no nor into than out up down over under him them me my our your has have had do did does shall will would should can could may might must o thee thou thy unto upon one also".split(" "));
+const words=t=>t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").match(/[\p{L}\p{N}']+/gu)||[];
+function grams(w,n){const s=new Map();for(let i=0;i+n<=w.length;i++){const g=w.slice(i,i+n).join(" ");if(!s.has(g))s.set(g,i)}return s}
+function score(wa,wb,n){const A=grams(wa,n),B=grams(wb,n);let c=0;const shared=[];for(const g of A.keys())if(B.has(g)){c++;shared.push(g)}
+return{shared,contain:A.size?c/A.size:0,jacc:(A.size+B.size-c)?c/(A.size+B.size-c):0}}
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function highlight(text,shared,n){const toks=text.split(/(\s+)/);const ws=[];toks.forEach((t,i)=>{if(t.trim())ws.push([i,words(t).join(" ")])});
+const S=new Set(shared),mark=new Set();for(let i=0;i+n<=ws.length;i++){const g=ws.slice(i,i+n).map(x=>x[1]).join(" ");if(S.has(g))for(let k=i;k<i+n;k++)mark.add(ws[k][0])}
+return toks.map((t,i)=>mark.has(i)?`<mark>${esc(t)}</mark>`:esc(t)).join("")}
+$('cmp').onclick=()=>{const n=+$('n1').value,A=$('a').value,B=$('b').value,r=score(words(A),words(B),n);
+$('r1').innerHTML=`<div class="card"><div class="score">${(r.contain*100).toFixed(1)}%</div>of Text A's ${n}-word phrases also appear in Text B. Overlap of both texts: ${(r.jacc*100).toFixed(1)}%. Shared phrases: ${r.shared.length}</div>
+<div class="card"><b>Text A</b><p>${highlight(A,r.shared,n)}</p></div><div class="card"><b>Text B</b><p>${highlight(B,r.shared,n)}</p></div>`};
+const PROX=[u=>"https://cors.eu.org/"+u,u=>"https://api.allorigins.win/raw?url="+encodeURIComponent(u),u=>"https://corsproxy.io/?url="+encodeURIComponent(u),u=>"https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(u)];
+async function fetchText(u){for(const p of PROX){try{const r=await fetch(p(u));if(r.ok){const t=await r.text();if(t.length>2000)return t}}catch(e){}}return null}
+function keywords(w,k){const f={};w.forEach(x=>{if(x.length>3&&!STOP.has(x))f[x]=(f[x]||0)+1});return Object.entries(f).sort((a,b)=>b[1]*b[0].length-a[1]*a[0].length).slice(0,k).map(x=>x[0])}
+function bestPassage(bt,shared,n){const bw=bt.split(/\s+/);const S=new Set(shared);let best=0,bi=0;const lw=bw.map(x=>words(x).join(" "));const hits=new Array(bw.length).fill(0);
+for(let i=0;i+n<=lw.length;i++)if(S.has(lw.slice(i,i+n).join(" ")))hits[i]=1;let run=0;const W=120;for(let i=0;i<hits.length;i++){run+=hits[i];if(i>=W)run-=hits[i-W];if(run>best){best=run;bi=i-W+1}}
+return bw.slice(Math.max(0,bi),bi+W).join(" ")}
+$('go').onclick=async()=>{const n=+$('n2').value,Q=$('q').value,qw=words(Q);if(qw.length<n){$('st').textContent="Paste a longer text.";return}
+const kws=keywords(qw,8),extra=$('kw').value.trim();const queries=[...(extra?[extra]:[]),kws.slice(0,2).join(" "),kws.slice(2,4).join(" "),...kws.slice(0,6)];
+$('st').textContent="Searching catalog for: "+queries.join(", ");$('r2').innerHTML="";
+const books=new Map(),max=+$('nb').value;
+for(const q of queries){if(books.size>=max)break;try{const j=await (await fetch("https://gutendex.com/books?languages=en&search="+encodeURIComponent(q))).json();
+for(const b of j.results){const u=Object.entries(b.formats).find(([k,v])=>k.startsWith("text/plain"));if(u&&!books.has(b.id)&&books.size<max)books.set(b.id,{title:b.title,author:(b.authors[0]||{}).name||"",url:u[1],id:b.id})}}catch(e){}}
+const res=[];let i=0;for(const b of books.values()){i++;$('st').textContent=`Checking book ${i} of ${books.size}: ${b.title}`;
+const t=await fetchText(b.url);if(!t)continue;const r=score(qw,words(t),n);res.push({...b,...r,text:t});res.sort((x,y)=>y.contain-x.contain);
+$('r2').innerHTML=res.slice(0,10).map(x=>`<div class="card"><b><a style="color:#a5d6a7" href="https://www.gutenberg.org/ebooks/${x.id}" target="_blank">${esc(x.title)}</a></b> <span class="small">${esc(x.author)}</span>
+<div class="score">${(x.contain*100).toFixed(2)}%</div><div class="bar"><div style="width:${Math.min(100,x.contain*100)}%"></div></div><span class="small">${x.shared.length} shared ${n}-word phrases</span>
+${x.shared.length?`<details><summary>Best matching passage</summary><p>${highlight(bestPassage(x.text,x.shared,n),x.shared,n)}</p></details>`:""}</div>`).join("")}
+$('st').textContent=res.length?`Done. Checked ${res.length} books.`:"Couldn't download any books. The proxies may be busy, so try again in a minute."}
+</script></body></html>
